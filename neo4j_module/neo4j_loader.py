@@ -50,20 +50,24 @@ class Neo4jConnector:
 
         with self.driver.session() as session:
             for edge in edge_list:
+                # 使用 apoc 创建动态关系类型
                 query = """
                 MATCH (a:Entity {id: $source_id})
                 MATCH (b:Entity {id: $target_id})
-                MERGE (a)-[r:RELATION {type: $rel_type}]->(b)
-                RETURN r
+                CALL apoc.merge.relationship(a, $rel_type, {}, {}, b, {}) YIELD rel
+                RETURN rel
                 """
-                result = session.run(query,
-                                   source_id=edge['source_id'],
-                                   target_id=edge['target_id'],
-                                   rel_type=edge['relation_type'])
+                try:
+                    result = session.run(query,
+                                       source_id=edge['source_id'],
+                                       target_id=edge['target_id'],
+                                       rel_type=edge['relation_type'])
 
-                if result.single():
-                    success_count += 1
-                else:
+                    if result.single():
+                        success_count += 1
+                    else:
+                        failed_edges.append(edge)
+                except Exception:
                     failed_edges.append(edge)
 
         return success_count, failed_edges

@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
 from mysql_extractor.mysql_extractor import MySQLExtractor
 from neo4j_module.neo4j_loader import Neo4jConnector
-from etl_controller.etl_controller import GraphMigrationController
 from dotenv import load_dotenv
 import os
 
@@ -158,12 +157,49 @@ def migrate_nodes():
     neo4j = Neo4jConnector()
     neo4j.connect()
 
-    controller = GraphMigrationController(mysql, neo4j)
-    controller.run_node_migration(batch_size)
+    try:
+        neo4j.create_unique_constraint("Entity", "id")
+        offset = 0
+        total_read = 0
+        total_filtered = 0
+        total_written = 0
 
-    mysql.disconnect()
-    neo4j.disconnect()
-    return jsonify({'success': True})
+        print(f"开始迁移节点，表名: {entity_table}")
+
+        while True:
+            nodes = mysql.fetch_entities(entity_table, batch_size, offset)
+            if not nodes:
+                break
+
+            total_read += len(nodes)
+            # 过滤掉 id 为 null 的记录
+            valid_nodes = [n for n in nodes if n.get('id') is not None]
+            filtered_count = len(nodes) - len(valid_nodes)
+            total_filtered += filtered_count
+
+            if valid_nodes:
+                neo4j.batch_merge_nodes(valid_nodes)
+                total_written += len(valid_nodes)
+                print(f"批次 offset={offset}: 读取 {len(nodes)} 条, 过滤 {filtered_count} 条, 写入 {len(valid_nodes)} 条")
+            else:
+                print(f"批次 offset={offset}: 读取 {len(nodes)} 条, 全部被过滤")
+
+            offset += batch_size
+
+        print(f"节点迁移完成: 总读取 {total_read} 条, 总过滤 {total_filtered} 条, 总写入 {total_written} 条")
+        result = {
+            'success': True,
+            'total_read': total_read,
+            'total_filtered': total_filtered,
+            'total_written': total_written
+        }
+    except Exception as e:
+        result = {'success': False, 'error': str(e)}
+    finally:
+        mysql.disconnect()
+        neo4j.disconnect()
+
+    return jsonify(result)
 
 @app.route('/etl/migrate-edges', methods=['POST'])
 def migrate_edges():
@@ -171,6 +207,11 @@ def migrate_edges():
     relation_table = data.get('relation_table')
     relation_filter = data.get('relation_filter')
     batch_size = data.get('batch_size', 2000)
+    field_mapping = data.get('field_mapping', {
+        'source_id': 'source_id',
+        'target_id': 'target_id',
+        'relation_type': 'relation_type'
+    })
 
     if not relation_table:
         return jsonify({'error': 'relation_table required'}), 400
@@ -180,15 +221,201 @@ def migrate_edges():
     neo4j = Neo4jConnector()
     neo4j.connect()
 
-    controller = GraphMigrationController(mysql, neo4j)
-    controller.run_edge_migration(relation_filter, batch_size)
+    try:
+        error_records = []
+        offset = 0
+        while True:
+            edges = mysql.fetch_relations(relation_table, relation_filter, batch_size, offset)
+            if not edges:
+                break
+            # 映射字段名
+            mapped_edges = []
+            for edge in edges:
+                mapped_edge = {
+                    'source_id': edge.get(field_mapping['source_id']),
+                    'target_id': edge.get(field_mapping['target_id']),
+                    'relation_type': edge.get(field_mapping['relation_type'])
+                }
+                if mapped_edge['source_id'] and mapped_edge['target_id']:
+                    mapped_edges.append(mapped_edge)
 
-    if controller.error_records:
-        controller.generate_error_report()
+            if mapped_edges:
+                success_count, failed_edges = neo4j.batch_merge_relationships(mapped_edges)
+                error_records.extend(failed_edges)
+            offset += batch_size
 
-    mysql.disconnect()
-    neo4j.disconnect()
-    return jsonify({'success': True, 'errors': len(controller.error_records)})
+        if error_records:
+            import csv
+            with open('error_report.csv', 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=error_records[0].keys())
+                writer.writeheader()
+                writer.writerows(error_records)
+
+        result = {'success': True, 'failed_edges': len(error_records)}
+    except Exception as e:
+        result = {'success': False, 'error': str(e)}
+    finally:
+        mysql.disconnect()
+        neo4j.disconnect()
+
+    return jsonify(result)
+
+@app.route('/etl/migrate-all', methods=['POST'])
+def migrate_all():
+    data = request.json
+    entity_table = data.get('entity_table')
+    relation_table = data.get('relation_table')
+    batch_size = data.get('batch_size', 2000)
+    init_schema = data.get('init_schema', False)
+    id_field = data.get('id_field', 'id')  # 实体表的ID字段名
+    name_field = data.get('name_field', 'name')  # 实体表的名称字段名
+
+    if not entity_table or not relation_table:
+        return jsonify({'error': 'entity_table and relation_table required'}), 400
+
+    mysql = MySQLExtractor(**DB_CONFIG)
+    mysql.connect()
+    neo4j = Neo4jConnector()
+    neo4j.connect()
+
+    try:
+        # 可选：初始化 schema
+        if init_schema:
+            entity_types = data.get('entity_types', [])
+            unique_id_key = data.get('unique_id_key', 'id')
+            index_keys = data.get('index_keys', [])
+            neo4j.init_schema(entity_types, unique_id_key, index_keys)
+
+        # 迁移节点
+        neo4j.create_unique_constraint("Entity", "id")
+        offset = 0
+        total_read = 0
+        total_filtered = 0
+        total_written = 0
+
+        print(f"开始迁移节点，表名: {entity_table}")
+
+        while True:
+            nodes = mysql.fetch_entities(entity_table, batch_size, offset)
+            if not nodes:
+                break
+
+            # 输出第一条数据的字段名用于调试
+            if offset == 0 and nodes:
+                print(f"实体表字段: {list(nodes[0].keys())}")
+                print(f"第一条数据示例 (前3个字段): {dict(list(nodes[0].items())[:3])}")
+
+            total_read += len(nodes)
+            # 过滤掉 id 为 null 的记录
+            valid_nodes = []
+            for n in nodes:
+                node_id = n.get(id_field)
+                if node_id is not None:
+                    # 重命名字段为 'id' 和 'name'
+                    node_copy = dict(n)
+                    node_copy['id'] = node_id
+                    if name_field in n:
+                        node_copy['name'] = n[name_field]
+                    valid_nodes.append(node_copy)
+            filtered_count = len(nodes) - len(valid_nodes)
+            total_filtered += filtered_count
+
+            if valid_nodes:
+                neo4j.batch_merge_nodes(valid_nodes)
+                total_written += len(valid_nodes)
+                print(f"批次 offset={offset}: 读取 {len(nodes)} 条, 过滤 {filtered_count} 条, 写入 {len(valid_nodes)} 条")
+            else:
+                print(f"批次 offset={offset}: 读取 {len(nodes)} 条, 全部被过滤")
+
+            offset += batch_size
+
+        print(f"节点迁移完成: 总读取 {total_read} 条, 总过滤 {total_filtered} 条, 总写入 {total_written} 条")
+
+        # 迁移关系
+        relation_filter = data.get('relation_filter')
+        field_mapping = data.get('field_mapping', {
+            'source_id': 'source_id',
+            'target_id': 'target_id',
+            'relation_type': 'relation_type'
+        })
+        error_records = []
+        offset = 0
+        total_edges_read = 0
+        total_edges_filtered = 0
+        total_edges_written = 0
+
+        print(f"开始迁移关系，表名: {relation_table}, 字段映射: {field_mapping}")
+
+        while True:
+            edges = mysql.fetch_relations(relation_table, relation_filter, batch_size, offset)
+            if not edges:
+                break
+
+            # 输出第一条数据的字段名用于调试
+            if offset == 0 and edges:
+                print(f"关系表字段: {list(edges[0].keys())}")
+                print(f"第一条数据示例 (前3个字段): {dict(list(edges[0].items())[:3])}")
+
+            total_edges_read += len(edges)
+            # 映射字段名
+            mapped_edges = []
+            for edge in edges:
+                mapped_edge = {
+                    'source_id': edge.get(field_mapping['source_id']),
+                    'target_id': edge.get(field_mapping['target_id']),
+                    'relation_type': edge.get(field_mapping['relation_type'])
+                }
+                if mapped_edge['source_id'] and mapped_edge['target_id']:
+                    mapped_edges.append(mapped_edge)
+
+            filtered_count = len(edges) - len(mapped_edges)
+            total_edges_filtered += filtered_count
+
+            if mapped_edges:
+                _, failed_edges = neo4j.batch_merge_relationships(mapped_edges)
+                error_records.extend(failed_edges)
+                success_count = len(mapped_edges) - len(failed_edges)
+                total_edges_written += success_count
+                print(f"批次 offset={offset}: 读取 {len(edges)} 条, 过滤 {filtered_count} 条, 成功 {success_count} 条, 失败 {len(failed_edges)} 条")
+            else:
+                print(f"批次 offset={offset}: 读取 {len(edges)} 条, 全部被过滤")
+
+            offset += batch_size
+
+        print(f"关系迁移完成: 总读取 {total_edges_read} 条, 总过滤 {total_edges_filtered} 条, 总写入 {total_edges_written} 条, 总失败 {len(error_records)} 条")
+
+        # 生成错误报告
+        if error_records:
+            import csv
+            with open('error_report.csv', 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=error_records[0].keys())
+                writer.writeheader()
+                writer.writerows(error_records)
+
+        result = {
+            'success': True,
+            'nodes': {
+                'total_read': total_read,
+                'total_filtered': total_filtered,
+                'total_written': total_written
+            },
+            'edges': {
+                'total_read': total_edges_read,
+                'total_filtered': total_edges_filtered,
+                'total_written': total_edges_written,
+                'total_failed': len(error_records)
+            },
+            'error_report': 'error_report.csv' if error_records else None
+        }
+
+    except Exception as e:
+        result = {'success': False, 'error': str(e)}
+
+    finally:
+        mysql.disconnect()
+        neo4j.disconnect()
+
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

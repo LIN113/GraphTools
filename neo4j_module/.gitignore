@@ -1,0 +1,7 @@
+# 默认忽略的文件
+.idea/
+.env
+.claude
+.agents
+.vscode
+__pycache__

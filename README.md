@@ -169,6 +169,26 @@ MATCH ()-[r]->() RETURN count(r)
 MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 10
 ```
 
+## 快捷方式：一键完整迁移
+
+如果你想一次性完成所有迁移步骤，可以使用一键迁移接口：
+
+```bash
+curl -X POST http://localhost:5000/etl/migrate-all \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entity_table": "entities",
+    "relation_table": "relations",
+    "batch_size": 2000,
+    "init_schema": true,
+    "entity_types": ["Person", "Company", "Product"],
+    "unique_id_key": "id",
+    "index_keys": ["name", "type"]
+  }'
+```
+
+该接口会自动完成：Schema 初始化 → 节点迁移 → 关系迁移 → 错误报告生成。
+
 ## API 接口文档
 
 ### MySQL 数据提取
@@ -196,6 +216,7 @@ MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 10
 |------|------|------|
 | `/etl/migrate-nodes` | POST | 自动迁移节点 |
 | `/etl/migrate-edges` | POST | 自动迁移关系 |
+| `/etl/migrate-all` | POST | 一键完整迁移（节点+关系） |
 
 ## 注意事项
 
