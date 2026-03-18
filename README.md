@@ -156,6 +156,22 @@ curl -X POST http://localhost:5000/etl/migrate-edges \
 
 ### 步骤 6：验证迁移结果
 
+通过 REST API 查看数据库元数据：
+
+```bash
+# 获取所有标签、关系类型和属性键
+curl http://localhost:5000/neo4j/schema
+```
+
+返回示例：
+```json
+{
+  "labels": ["Entity", "User", "Product"],
+  "relationship_types": ["PURCHASED", "FOLLOWS"],
+  "property_keys": ["id", "name", "type", "age", "price"]
+}
+```
+
 在 Neo4j Browser 中执行：
 
 ```cypher
@@ -256,6 +272,7 @@ curl -X POST http://localhost:5000/etl/migrate-all \
 | `/neo4j/init-schema` | POST | 初始化约束和索引 |
 | `/neo4j/load-nodes` | POST | 批量加载节点 |
 | `/neo4j/load-relationships` | POST | 批量加载关系 |
+| `/neo4j/schema` | GET | 获取数据库元数据（标签、关系类型、属性键） |
 
 ### ETL 迁移
 

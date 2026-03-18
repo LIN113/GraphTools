@@ -71,3 +71,10 @@ class Neo4jConnector:
                     failed_edges.append(edge)
 
         return success_count, failed_edges
+
+    def get_schema(self) -> Dict:
+        with self.driver.session() as session:
+            labels = [record['label'] for record in session.run("CALL db.labels()")]
+            rel_types = [record['relationshipType'] for record in session.run("CALL db.relationshipTypes()")]
+            prop_keys = [record['propertyKey'] for record in session.run("CALL db.propertyKeys()")]
+            return {'labels': labels, 'relationship_types': rel_types, 'property_keys': prop_keys}

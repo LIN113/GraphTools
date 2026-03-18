@@ -142,6 +142,14 @@ def load_relationships():
     neo4j.disconnect()
     return jsonify({'success_count': success_count, 'failed_count': len(failed_edges)})
 
+@app.route('/neo4j/schema', methods=['GET'])
+def get_schema():
+    neo4j = Neo4jConnector()
+    neo4j.connect()
+    schema = neo4j.get_schema()
+    neo4j.disconnect()
+    return jsonify(schema)
+
 # ETL 迁移接口
 @app.route('/etl/migrate-nodes', methods=['POST'])
 def migrate_nodes():
