@@ -1,12 +1,15 @@
 from neo4j import GraphDatabase
 from typing import List, Dict, Tuple
+import os
+from dotenv import load_dotenv
 
 
 class Neo4jConnector:
-    def __init__(self, uri: str, user: str, password: str):
-        self.uri = uri
-        self.user = user
-        self.password = password
+    def __init__(self, uri: str = None, user: str = None, password: str = None):
+        load_dotenv()
+        self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+        self.user = user or os.getenv('NEO4J_USER', 'neo4j')
+        self.password = password or os.getenv('NEO4J_PASSWORD')
         self.driver = None
 
     def connect(self):
@@ -20,6 +23,17 @@ class Neo4jConnector:
         with self.driver.session() as session:
             query = f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"
             session.run(query)
+
+    def create_index(self, label: str, property_name: str):
+        with self.driver.session() as session:
+            query = f"CREATE INDEX IF NOT EXISTS FOR (n:{label}) ON (n.{property_name})"
+            session.run(query)
+
+    def init_schema(self, entity_types: list, unique_id_key: str, index_keys: list):
+        for entity_type in entity_types:
+            self.create_unique_constraint(entity_type, unique_id_key)
+            for index_key in index_keys:
+                self.create_index(entity_type, index_key)
 
     def batch_merge_nodes(self, node_list: List[Dict]):
         with self.driver.session() as session:
