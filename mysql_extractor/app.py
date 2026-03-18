@@ -71,5 +71,41 @@ def get_relations():
     extractor.disconnect()
     return jsonify({'relations': relations, 'count': len(relations)})
 
+@app.route('/tables/check', methods=['GET'])
+def check_metadata():
+    """健康检查：验证表和必需字段"""
+    table_name = request.args.get('table_name')
+    required_columns = request.args.get('required_columns')
+
+    if not table_name or not required_columns:
+        return jsonify({'error': 'table_name and required_columns are required'}), 400
+
+    columns_list = [col.strip() for col in required_columns.split(',')]
+
+    extractor = MySQLExtractor(**DB_CONFIG)
+    extractor.connect()
+    try:
+        extractor.check_metadata(table_name, columns_list)
+        extractor.disconnect()
+        return jsonify({'valid': True, 'message': '表结构验证通过'})
+    except ValueError as e:
+        extractor.disconnect()
+        return jsonify({'valid': False, 'error': str(e)}), 400
+
+@app.route('/tables/entity-types', methods=['GET'])
+def get_entity_types():
+    """获取所有实体类型"""
+    table_name = request.args.get('table_name')
+    type_column = request.args.get('type_column')
+
+    if not table_name or not type_column:
+        return jsonify({'error': 'table_name and type_column are required'}), 400
+
+    extractor = MySQLExtractor(**DB_CONFIG)
+    extractor.connect()
+    entity_types = extractor.get_distinct_entity_types(table_name, type_column)
+    extractor.disconnect()
+    return jsonify({'entity_types': entity_types})
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

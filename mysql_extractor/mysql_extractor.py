@@ -57,3 +57,24 @@ class MySQLExtractor:
 
         self.cursor.execute(sql, params)
         return self.cursor.fetchall()
+
+    def check_metadata(self, table_name: str, required_columns: List[str]) -> bool:
+        """健康检查：确认表是否存在及是否包含必需字段"""
+        tables = self.get_all_tables()
+        if table_name not in tables:
+            raise ValueError(f"表 '{table_name}' 不存在")
+
+        columns = self.get_table_columns(table_name)
+        column_names = [col['field'] for col in columns]
+
+        missing = [col for col in required_columns if col not in column_names]
+        if missing:
+            raise ValueError(f"表 '{table_name}' 缺少必需字段: {missing}")
+
+        return True
+
+    def get_distinct_entity_types(self, table_name: str, type_column_name: str) -> List[str]:
+        """从实体表中去重查询所有实例类型"""
+        sql = f"SELECT DISTINCT `{type_column_name}` FROM `{table_name}` WHERE `{type_column_name}` IS NOT NULL"
+        self.cursor.execute(sql)
+        return [row[type_column_name] for row in self.cursor.fetchall()]
