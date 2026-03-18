@@ -25,18 +25,26 @@ def get_tables():
     extractor.disconnect()
     return jsonify({'tables': tables})
 
-@app.route('/tables/<table_name>/columns', methods=['GET'])
-def get_columns(table_name):
+@app.route('/tables/columns', methods=['GET'])
+def get_columns():
     """获取表的字段信息"""
+    table_name = request.args.get('table_name')
+    if not table_name:
+        return jsonify({'error': 'table_name parameter is required'}), 400
+
     extractor = MySQLExtractor(**DB_CONFIG)
     extractor.connect()
     columns = extractor.get_table_columns(table_name)
     extractor.disconnect()
     return jsonify({'columns': columns})
 
-@app.route('/tables/<table_name>/entities', methods=['GET'])
-def get_entities(table_name):
+@app.route('/tables/entities', methods=['GET'])
+def get_entities():
     """获取实体数据"""
+    table_name = request.args.get('table_name')
+    if not table_name:
+        return jsonify({'error': 'table_name parameter is required'}), 400
+
     batch_size = request.args.get('batch_size', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
 
@@ -46,12 +54,16 @@ def get_entities(table_name):
     extractor.disconnect()
     return jsonify({'entities': entities, 'count': len(entities)})
 
-@app.route('/tables/<table_name>/relations', methods=['GET'])
-def get_relations(table_name):
+@app.route('/tables/relations', methods=['GET'])
+def get_relations():
     """获取关系数据"""
+    table_name = request.args.get('table_name')
+    if not table_name:
+        return jsonify({'error': 'table_name parameter is required'}), 400
+
     batch_size = request.args.get('batch_size', 100, type=int)
     offset = request.args.get('offset', 0, type=int)
-    relation_filter = {k: v for k, v in request.args.items() if k not in ['batch_size', 'offset']}
+    relation_filter = {k: v for k, v in request.args.items() if k not in ['table_name', 'batch_size', 'offset']}
 
     extractor = MySQLExtractor(**DB_CONFIG)
     extractor.connect()

@@ -55,7 +55,15 @@ GET /tables
 ### 获取表字段信息
 
 ```
-GET /tables/<table_name>/columns
+GET /tables/columns?table_name=<表名>
+```
+
+**参数：**
+- `table_name`: 表名（必填）
+
+**CURL 示例：**
+```bash
+curl "http://localhost:5000/tables/columns?table_name=水利对象及关系图谱_关系"
 ```
 
 **响应示例：**
@@ -71,12 +79,18 @@ GET /tables/<table_name>/columns
 ### 获取实体数据
 
 ```
-GET /tables/<table_name>/entities?batch_size=100&offset=0
+GET /tables/entities?table_name=<表名>&batch_size=100&offset=0
 ```
 
 **参数：**
+- `table_name`: 表名（必填）
 - `batch_size`: 每页数量（默认 100）
 - `offset`: 偏移量（默认 0）
+
+**CURL 示例：**
+```bash
+curl "http://localhost:5000/tables/entities?table_name=水利对象及关系图谱_实体&batch_size=100&offset=0"
+```
 
 **响应示例：**
 ```json
@@ -91,13 +105,19 @@ GET /tables/<table_name>/entities?batch_size=100&offset=0
 ### 获取关系数据
 
 ```
-GET /tables/<table_name>/relations?batch_size=100&offset=0&关系名称=流向
+GET /tables/relations?table_name=<表名>&batch_size=100&offset=0&关系名称=流向
 ```
 
 **参数：**
+- `table_name`: 表名（必填）
 - `batch_size`: 每页数量（默认 100）
 - `offset`: 偏移量（默认 0）
 - 其他参数作为过滤条件
+
+**CURL 示例：**
+```bash
+curl "http://localhost:5000/tables/relations?table_name=水利对象及关系图谱_关系&batch_size=100&offset=0&关系名称=流向"
+```
 
 **响应示例：**
 ```json
@@ -112,6 +132,34 @@ GET /tables/<table_name>/relations?batch_size=100&offset=0&关系名称=流向
   ],
   "count": 1
 }
+```
+
+## 分页查询说明
+
+### offset 参数作用
+
+`offset` 是分页查询中的偏移量参数，表示跳过前面多少条记录。
+
+**分页原理：**
+- `offset=0, batch_size=100` → 获取第 1-100 条记录（第1页）
+- `offset=100, batch_size=100` → 获取第 101-200 条记录（第2页）
+- `offset=200, batch_size=100` → 获取第 201-300 条记录（第3页）
+
+**计算公式：**
+```
+offset = (页码 - 1) × batch_size
+```
+
+**分页示例：**
+```bash
+# 第1页（前100条）
+curl "http://localhost:5000/tables/entities?table_name=水利对象及关系图谱_实体&batch_size=100&offset=0"
+
+# 第2页（101-200条）
+curl "http://localhost:5000/tables/entities?table_name=水利对象及关系图谱_实体&batch_size=100&offset=100"
+
+# 第3页（201-300条）
+curl "http://localhost:5000/tables/entities?table_name=水利对象及关系图谱_实体&batch_size=100&offset=200"
 ```
 
 ## 项目结构
