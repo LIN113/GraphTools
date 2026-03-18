@@ -180,14 +180,61 @@ curl -X POST http://localhost:5000/etl/migrate-all \
     "entity_table": "entities",
     "relation_table": "relations",
     "batch_size": 2000,
+    "id_field": "实例ID",
+    "name_field": "实例名称",
     "init_schema": true,
     "entity_types": ["Person", "Company", "Product"],
     "unique_id_key": "id",
-    "index_keys": ["name", "type"]
+    "index_keys": ["name", "type"],
+    "field_mapping": {
+      "source_id": "起始实例ID",
+      "target_id": "目标实例ID",
+      "relation_type": "关系名称"
+    }
   }'
 ```
 
+**参数说明：**
+
+| 参数 | 必需 | 默认值 | 说明 |
+|------|------|--------|------|
+| `entity_table` | 是 | - | 实体表名 |
+| `relation_table` | 是 | - | 关系表名 |
+| `batch_size` | 否 | 2000 | 批次大小 |
+| `id_field` | 否 | "id" | 实体表的ID字段名 |
+| `name_field` | 否 | "name" | 实体表的名称字段名 |
+| `init_schema` | 否 | false | 是否初始化 schema |
+| `field_mapping` | 否 | 见下方 | 关系表字段映射 |
+
+**field_mapping 默认值：**
+```json
+{
+  "source_id": "source_id",
+  "target_id": "target_id",
+  "relation_type": "relation_type"
+}
+```
+
 该接口会自动完成：Schema 初始化 → 节点迁移 → 关系迁移 → 错误报告生成。
+
+**返回结果示例：**
+```json
+{
+  "success": true,
+  "nodes": {
+    "total_read": 1000,
+    "total_filtered": 50,
+    "total_written": 950
+  },
+  "edges": {
+    "total_read": 2000,
+    "total_filtered": 100,
+    "total_written": 1850,
+    "total_failed": 50
+  },
+  "error_report": "error_report.csv"
+}
+```
 
 ## API 接口文档
 
@@ -221,8 +268,14 @@ curl -X POST http://localhost:5000/etl/migrate-all \
 ## 注意事项
 
 - 确保 MySQL 和 Neo4j 数据库已启动
+- **Neo4j 需要安装 APOC 插件**（用于动态关系类型创建）
+  - 下载 APOC jar 文件到 `plugins` 目录
+  - 在 `neo4j.conf` 添加：`dbms.security.procedures.unrestricted=apoc.*`
+  - 重启 Neo4j
 - 必须先执行节点迁移，再执行关系迁移
 - 关系迁移前确保相关节点已存在
 - 定期检查 `error_report.csv` 并处理失败记录
 - 大数据量迁移建议调整 `batch_size` 参数
+- 使用 `id_field` 和 `name_field` 参数适配不同的表结构
+- 使用 `field_mapping` 参数映射关系表字段名
 
