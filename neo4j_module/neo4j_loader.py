@@ -5,11 +5,12 @@ from dotenv import load_dotenv
 
 
 class Neo4jConnector:
-    def __init__(self, uri: str = None, user: str = None, password: str = None):
+    def __init__(self, uri: str = None, user: str = None, password: str = None, database: str = None):
         load_dotenv()
         self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
         self.user = user or os.getenv('NEO4J_USER', 'neo4j')
         self.password = password or os.getenv('NEO4J_PASSWORD')
+        self.database = database or os.getenv('NEO4J_DATABASE', 'neo4j')
         self.driver = None
 
     def connect(self):
@@ -20,12 +21,12 @@ class Neo4jConnector:
             self.driver.close()
 
     def create_unique_constraint(self, label: str, property_name: str):
-        with self.driver.session() as session:
+        with self.driver.session(database=self.database) as session:
             query = f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"
             session.run(query)
 
     def create_index(self, label: str, property_name: str):
-        with self.driver.session() as session:
+        with self.driver.session(database=self.database) as session:
             query = f"CREATE INDEX IF NOT EXISTS FOR (n:{label}) ON (n.{property_name})"
             session.run(query)
 
@@ -36,7 +37,7 @@ class Neo4jConnector:
                 self.create_index(entity_type, index_key)
 
     def batch_merge_nodes(self, node_list: List[Dict]):
-        with self.driver.session() as session:
+        with self.driver.session(database=self.database) as session:
             query = """
             UNWIND $nodes AS node
             MERGE (n:Entity {id: node.id})
@@ -48,7 +49,7 @@ class Neo4jConnector:
         success_count = 0
         failed_edges = []
 
-        with self.driver.session() as session:
+        with self.driver.session(database=self.database) as session:
             for edge in edge_list:
                 # 使用 apoc 创建动态关系类型
                 query = """
@@ -73,7 +74,7 @@ class Neo4jConnector:
         return success_count, failed_edges
 
     def get_schema(self) -> Dict:
-        with self.driver.session() as session:
+        with self.driver.session(database=self.database) as session:
             labels = [record['label'] for record in session.run("CALL db.labels()")]
             rel_types = [record['relationshipType'] for record in session.run("CALL db.relationshipTypes()")]
             prop_keys = [record['propertyKey'] for record in session.run("CALL db.propertyKeys()")]
