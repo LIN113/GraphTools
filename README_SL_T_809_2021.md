@@ -193,6 +193,8 @@ GET /metadata/entity-table?obj_type_code=EX_WRZ
 
 ### 5. 验证迁移前置条件
 
+#### 单个验证
+
 ```
 POST /migrate/validate
 Content-Type: application/json
@@ -202,7 +204,18 @@ Content-Type: application/json
 }
 ```
 
-**成功响应：**
+#### 批量验证
+
+```
+POST /migrate/validate
+Content-Type: application/json
+
+{
+  "rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD", "REL_LK_RV_1"]
+}
+```
+
+**成功响应（单个）：**
 ```json
 {
   "success": true,
@@ -232,9 +245,43 @@ Content-Type: application/json
 }
 ```
 
+**成功响应（批量）：**
+```json
+{
+  "success": true,
+  "mode": "batch",
+  "summary": {
+    "total": 3,
+    "passed": 2,
+    "failed": 1
+  },
+  "results": [
+    {
+      "rel_table": "REL_ST_RV",
+      "success": true,
+      "message": "验证通过",
+      "metadata": { ... }
+    },
+    {
+      "rel_table": "REL_WRZ_AD",
+      "success": true,
+      "message": "验证通过",
+      "metadata": { ... }
+    },
+    {
+      "rel_table": "REL_LK_RV_1",
+      "success": false,
+      "issues": ["目标实体表 ATT_RV_BASE 不存在"]
+    }
+  ]
+}
+```
+
 ---
 
 ### 6. 执行数据迁移
+
+#### 单个迁移
 
 ```
 POST /migrate/run
@@ -246,7 +293,19 @@ Content-Type: application/json
 }
 ```
 
-**响应示例：**
+#### 批量迁移
+
+```
+POST /migrate/run
+Content-Type: application/json
+
+{
+  "rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD", "REL_LK_RV_1"],
+  "batch_size": 2000
+}
+```
+
+**响应示例（单个）：**
 ```json
 {
   "success": true,
@@ -265,6 +324,44 @@ Content-Type: application/json
     "relationships_created": 4990,
     "errors": 0
   }
+}
+```
+
+**响应示例（批量）：**
+```json
+{
+  "success": true,
+  "mode": "batch",
+  "summary": {
+    "total_tables": 3,
+    "success_count": 2,
+    "failed_count": 1,
+    "total_nodes": 12500,
+    "total_relationships": 9900
+  },
+  "results": [
+    {
+      "rel_table": "REL_ST_RV",
+      "status": "success",
+      "result": {
+        "success": true,
+        "stats": { "nodes_merged": 8000, "relationships_created": 5000 }
+      }
+    },
+    {
+      "rel_table": "REL_WRZ_AD",
+      "status": "success",
+      "result": {
+        "success": true,
+        "stats": { "nodes_merged": 4500, "relationships_created": 4900 }
+      }
+    },
+    {
+      "rel_table": "REL_LK_RV_1",
+      "status": "failed",
+      "error": "关系表不存在"
+    }
+  ]
 }
 ```
 
@@ -318,7 +415,7 @@ Content-Type: application/json
 
 ## 使用示例
 
-### 完整迁移流程
+### 单个迁移流程
 
 ```bash
 # 1. 检查服务健康状态
@@ -339,6 +436,25 @@ curl -X POST http://localhost:5002/migrate/validate \
 curl -X POST http://localhost:5002/migrate/run \
   -H "Content-Type: application/json" \
   -d '{"rel_table_identify": "REL_ST_RV", "batch_size": 2000}'
+```
+
+### 批量迁移流程
+
+```bash
+# 1. 批量验证多个关系表
+curl -X POST http://localhost:5002/migrate/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD", "REL_LK_RV_1"]
+  }'
+
+# 2. 批量执行迁移（复用连接，提高效率）
+curl -X POST http://localhost:5002/migrate/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD", "REL_LK_RV_1"],
+    "batch_size": 2000
+  }'
 ```
 
 ---

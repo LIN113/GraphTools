@@ -243,6 +243,10 @@ class MetadataDrivenMigration:
                 self.neo4j.batch_merge_nodes(node_list)
                 total_nodes_merged += len(node_list)
 
+            # 初始化批次统计变量
+            success_count = 0
+            failed = []
+
             if edges_to_create:
                 success_count, failed = self.neo4j.batch_merge_relationships(edges_to_create)
                 total_rels_created += success_count
@@ -411,7 +415,16 @@ def get_entity_table_info():
 
 @app.route('/migrate/run', methods=['POST'])
 def run_migration():
-    """执行元数据驱动的数据迁移"""
+    """执行元数据驱动的数据迁移
+
+    支持单个关系表或批量迁移多个关系表
+
+    单个迁移请求:
+        {"rel_table_identify": "REL_ST_RV", "batch_size": 2000}
+
+    批量迁移请求:
+        {"rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD"], "batch_size": 2000}
+    """
     data = request.json
     rel_table_identify = data.get('rel_table_identify')
     batch_size = data.get('batch_size', 2000)
@@ -419,51 +432,108 @@ def run_migration():
     if not rel_table_identify:
         return jsonify({'success': False, 'error': 'rel_table_identify required'}), 400
 
-    migrator = MetadataDrivenMigration()
-    try:
-        result = migrator.migrate(rel_table_identify, batch_size)
-        return jsonify(result)
-    except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        migrator.close()
+    # 判断是单个还是批量
+    is_batch = isinstance(rel_table_identify, list)
+
+    if is_batch:
+        # 批量迁移
+        results = []
+        total_stats = {
+            'total_tables': len(rel_table_identify),
+            'success_count': 0,
+            'failed_count': 0,
+            'total_nodes': 0,
+            'total_relationships': 0
+        }
+
+        migrator = MetadataDrivenMigration()
+        try:
+            for rel_table in rel_table_identify:
+                try:
+                    result = migrator.migrate(rel_table, batch_size)
+                    results.append({
+                        'rel_table': rel_table,
+                        'status': 'success',
+                        'result': result
+                    })
+                    total_stats['success_count'] += 1
+                    if result.get('success'):
+                        total_stats['total_nodes'] += result['stats']['nodes_merged']
+                        total_stats['total_relationships'] += result['stats']['relationships_created']
+                except Exception as e:
+                    results.append({
+                        'rel_table': rel_table,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
+                    total_stats['failed_count'] += 1
+
+            return jsonify({
+                'success': True,
+                'mode': 'batch',
+                'summary': total_stats,
+                'results': results
+            })
+        finally:
+            migrator.close()
+    else:
+        # 单个迁移
+        migrator = MetadataDrivenMigration()
+        try:
+            result = migrator.migrate(rel_table_identify, batch_size)
+            return jsonify(result)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+        finally:
+            migrator.close()
 
 
 @app.route('/migrate/validate', methods=['POST'])
 def validate_migration():
-    """验证迁移前置条件"""
+    """验证迁移前置条件
+
+    支持单个或批量验证
+
+    单个验证请求:
+        {"rel_table_identify": "REL_ST_RV"}
+
+    批量验证请求:
+        {"rel_table_identify": ["REL_ST_RV", "REL_WRZ_AD"]}
+    """
     data = request.json
     rel_table_identify = data.get('rel_table_identify')
 
     if not rel_table_identify:
         return jsonify({'success': False, 'error': 'rel_table_identify required'}), 400
 
-    mysql = MySQLExtractor(**DB_CONFIG)
-    mysql.connect()
-    try:
+    # 判断是单个还是批量
+    is_batch = isinstance(rel_table_identify, list)
+
+    def validate_single(rel_table, mysql):
+        """验证单个关系表"""
         # 1. 检查元数据表是否存在
         tables = mysql.get_all_tables()
         if 'obj_rel_info' not in tables:
-            return jsonify({
+            return {
                 'success': False,
                 'error': '元数据表 obj_rel_info 不存在，请检查数据库连接配置'
-            }), 400
+            }
 
         sql = """
         SELECT obj_rel_name, start_obj_type_code, end_obj_type_code, rel_table_fields
         FROM obj_rel_info
         WHERE rel_table_identify = %s
         """
-        mysql.cursor.execute(sql, (rel_table_identify,))
+        mysql.cursor.execute(sql, (rel_table,))
         metadata = mysql.cursor.fetchone()
 
         if not metadata:
-            return jsonify({
+            return {
                 'success': False,
-                'error': f'关系表 {rel_table_identify} 在 obj_rel_info 中未找到'
-            }), 404
+                'error': f'关系表 {rel_table} 在 obj_rel_info 中未找到'
+            }
 
         rel_table_fields = json.loads(metadata['rel_table_fields']) if metadata['rel_table_fields'] else []
 
@@ -480,8 +550,8 @@ def validate_migration():
         tables = mysql.get_all_tables()
         issues = []
 
-        if rel_table_identify not in tables:
-            issues.append(f"关系表 {rel_table_identify} 不存在")
+        if rel_table not in tables:
+            issues.append(f"关系表 {rel_table} 不存在")
 
         start_type = metadata['start_obj_type_code']
         end_type = metadata['end_obj_type_code']
@@ -498,8 +568,8 @@ def validate_migration():
             issues.append(f"目标实体表 {end_table} 不存在")
 
         # 3. 检查字段是否存在
-        if rel_table_identify in tables:
-            start_columns = mysql.get_table_columns(rel_table_identify)
+        if rel_table in tables:
+            start_columns = mysql.get_table_columns(rel_table)
             column_names = [c['field'] for c in start_columns]
 
             if source_field and source_field not in column_names:
@@ -509,17 +579,17 @@ def validate_migration():
                 issues.append(f"关系表缺少目标字段 {target_field}")
 
         if issues:
-            return jsonify({
+            return {
                 'success': False,
                 'error': '验证失败',
                 'issues': issues
-            }), 400
+            }
 
-        return jsonify({
+        return {
             'success': True,
             'message': '验证通过',
             'metadata': {
-                'rel_table_identify': rel_table_identify,
+                'rel_table_identify': rel_table,
                 'relation_name': metadata['obj_rel_name'],
                 'start_type': start_type,
                 'end_type': end_type,
@@ -528,7 +598,50 @@ def validate_migration():
                 'source_field': source_field,
                 'target_field': target_field
             }
-        })
+        }
+
+    mysql = MySQLExtractor(**DB_CONFIG)
+    mysql.connect()
+    try:
+        if is_batch:
+            # 批量验证
+            results = []
+            summary = {
+                'total': len(rel_table_identify),
+                'passed': 0,
+                'failed': 0
+            }
+
+            for rel_table in rel_table_identify:
+                try:
+                    result = validate_single(rel_table, mysql)
+                    results.append({
+                        'rel_table': rel_table,
+                        **result
+                    })
+                    if result['success']:
+                        summary['passed'] += 1
+                    else:
+                        summary['failed'] += 1
+                except Exception as e:
+                    results.append({
+                        'rel_table': rel_table,
+                        'success': False,
+                        'error': f'验证出错: {str(e)}'
+                    })
+                    summary['failed'] += 1
+
+            return jsonify({
+                'success': summary['failed'] == 0,
+                'mode': 'batch',
+                'summary': summary,
+                'results': results
+            })
+        else:
+            # 单个验证
+            result = validate_single(rel_table_identify, mysql)
+            status_code = 200 if result['success'] else 400
+            return jsonify(result), status_code
     except Exception as e:
         return jsonify({
             'success': False,
